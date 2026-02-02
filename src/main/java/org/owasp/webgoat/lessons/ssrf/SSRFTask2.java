@@ -75,7 +75,7 @@ public class SSRFTask2 implements AssignmentEndpoint {
     try (InputStream in = conn.getInputStream()) {
       html = new String(in.readAllBytes(), StandardCharsets.UTF_8).replaceAll("\n", "<br>");
     } catch (IOException e) {
-     
+       html =
           "<html><body>Although the http://ifconfig.pro site is down, you still managed to solve"
               + " this exercise the right way!</body></html>";
     }
