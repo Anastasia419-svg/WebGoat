@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.Map;
 import javax.xml.XMLConstants;
 import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLResolver;
 import javax.xml.stream.XMLStreamException;
 import org.owasp.webgoat.container.users.WebGoatUser;
 import org.springframework.context.annotation.Scope;
@@ -67,19 +68,35 @@ public class CommentsCache {
    */
   protected Comment parseXml(String xml, boolean securityEnabled)
       throws XMLStreamException, JAXBException {
+
+    // NOTE:
+    // To remediate XXE properly, parsing must be hardened regardless of the "securityEnabled" flag.
+    // Otherwise CodeQL correctly reports that user-controlled XML can resolve external entities.
     var jc = JAXBContext.newInstance(Comment.class);
     var xif = XMLInputFactory.newInstance();
-    xif.setProperty(XMLInputFactory.SUPPORT_DTD, false);
-    xif.setProperty("javax.xml.stream.isSupportingExternalEntities", false);
 
-    // TODO fix me disabled for now.
-    if (securityEnabled) {
-      xif.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, ""); // Compliant
-      xif.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, ""); // compliant
-    }
+    // 1) Disallow DTDs completely
+    xif.setProperty(XMLInputFactory.SUPPORT_DTD, false);
+
+    // 2) Disallow external entities
+    xif.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
+
+    // 3) Disallow external access via JAXP properties
+    xif.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+    xif.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+
+    // 4) Extra hardening: prevent any attempt to resolve entities
+    xif.setXMLResolver(
+        new XMLResolver() {
+          @Override
+          public Object resolveEntity(
+              String publicID, String systemID, String baseURI, String namespace)
+              throws XMLStreamException {
+            return ""; // block
+          }
+        });
 
     var xsr = xif.createXMLStreamReader(new StringReader(xml));
-
     var unmarshaller = jc.createUnmarshaller();
     return (Comment) unmarshaller.unmarshal(xsr);
   }
@@ -90,9 +107,10 @@ public class CommentsCache {
     if (visibleForAllUsers) {
       comments.add(comment);
     } else {
-      var comments = userComments.getOrDefault(user.getUsername(), new Comments());
-      comments.add(comment);
-      userComments.put(user, comments);
+      // Fix: map key is WebGoatUser, not username String
+      var userSpecificComments = userComments.getOrDefault(user, new Comments());
+      userSpecificComments.add(comment);
+      userComments.put(user, userSpecificComments);
     }
   }
 
@@ -102,3 +120,4 @@ public class CommentsCache {
     initDefaultComments();
   }
 }
+
